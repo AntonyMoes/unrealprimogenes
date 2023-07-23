@@ -40,8 +40,23 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
 	// TODO
 }
 
-bool APlayerCharacter::CanJumpInternal_Implementation() const {
-	return Super::CanJumpInternal_Implementation() || bInWallSlide;
+void APlayerCharacter::TryJump()
+{
+	if (!bInWallSlide)
+	{
+		Jump();
+		return;
+	}
+
+	constexpr auto JumpSpeed = 700;
+
+	const auto TargetComponent = FindComponentByClass<UPrimitiveComponent>();
+	FVector JumpVector(-1 * WallSlideDirection, 0, 1);
+	JumpVector.Normalize();
+	JumpVector *= JumpSpeed;
+
+	GetMovementComponent()->Velocity = JumpVector;
+	SetWallSlideState(false);
 }
 
 void APlayerCharacter::Tick(float DeltaTime)
@@ -52,18 +67,9 @@ void APlayerCharacter::Tick(float DeltaTime)
 
 void APlayerCharacter::HandleWallSlide()
 {
-	auto SetWallSlide = [this](auto inWallSlide)
-	{
-		if (bInWallSlide && !inWallSlide)
-			GLog->Log("Not in Wall slide");
-		else if (!bInWallSlide && inWallSlide)
-			GLog->Log("In Wall slide");
-		bInWallSlide = inWallSlide;
-	};
-
 	if (!GetMovementComponent()->IsFalling())
 	{
-		SetWallSlide(false);
+		SetWallSlideState(false);
 		return;
 	}
 
@@ -72,18 +78,21 @@ void APlayerCharacter::HandleWallSlide()
 	CollisionShape.SetCapsule(CollisionShape.Capsule.Radius + 1, CollisionShape.Capsule.HalfHeight);
 	FCollisionQueryParams IgnoreSelf(FName(TEXT("TraceParam")), false, this);
 	FHitResult HitResult;
-	auto hit = GetWorld()->SweepSingleByChannel(HitResult, Location, Location, FQuat::Identity, ECC_Visibility, CollisionShape, IgnoreSelf);
-	if (hit && (!bInWallSlide || GetVelocity().Z <= 0))
+	auto bHit = GetWorld()->SweepSingleByChannel(HitResult, Location, Location, FQuat::Identity,
+		ECC_Visibility, CollisionShape, IgnoreSelf);
+	if (bHit && (!bInWallSlide || GetVelocity().Z <= 0))
 	{
-		auto Angle = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(HitResult.ImpactNormal, GetLastMovementInputVector())));
-		auto InputIntoWallSlide = Angle > 90;
+		auto LastMovementInput = GetLastMovementInputVector();
+		auto HorizontalInput = LastMovementInput.X;
+		auto Angle = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(HitResult.ImpactNormal, LastMovementInput)));
 
+		auto InputIntoWallSlide = Angle > 90 && HorizontalInput != 0;
 		if (InputIntoWallSlide)
-			SetWallSlide(true);
+			SetWallSlideState(true, HorizontalInput > 0 ? 1 : -1);
 	}
 	else
 	{
-		SetWallSlide(false);
+		SetWallSlideState(false);
 	}
 
 	if (bInWallSlide)
@@ -94,15 +103,25 @@ void APlayerCharacter::HandleWallSlide()
 	}
 }
 
+void APlayerCharacter::SetWallSlideState(bool InWallSlide, int Direction)
+{
+	if (bInWallSlide && !InWallSlide)
+		GLog->Log("Not in Wall slide");
+	else if (!bInWallSlide && InWallSlide)
+		GLog->Log("In Wall slide");
+	bInWallSlide = InWallSlide;
+	WallSlideDirection = Direction;
+}
+
 void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
 
-	if (auto* Input = CastChecked<UEnhancedInputComponent>(PlayerInputComponent))
+	if (const auto Input = CastChecked<UEnhancedInputComponent>(PlayerInputComponent))
 	{
 		Input->BindAction(MoveAction, ETriggerEvent::Triggered, this, &APlayerCharacter::Move);
 		Input->BindAction(LookAction, ETriggerEvent::Triggered, this, &APlayerCharacter::Look);
-		Input->BindAction(JumpAction, ETriggerEvent::Triggered, this, &APlayerCharacter::Jump);
+		Input->BindAction(JumpAction, ETriggerEvent::Triggered, this, &APlayerCharacter::TryJump);
 		Input->BindAction(LookAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopJumping);
 	}
 }
