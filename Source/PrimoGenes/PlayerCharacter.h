@@ -32,6 +32,7 @@ protected:
 
 	void Move(const FInputActionValue& Value);
 	void Look(const FInputActionValue& Value);
+	virtual bool CanJumpInternal_Implementation() const override;
 
 public:	
 	virtual void Tick(float DeltaTime) override;
@@ -39,4 +40,5 @@ public:
 
 private:
 	void HandleWallSlide();
+	bool bInWallSlide;
 };
